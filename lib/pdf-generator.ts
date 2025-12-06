@@ -1,9 +1,12 @@
 /**
  * PDF Generator using Puppeteer
  * Converts HTML proposals to professionally formatted PDF documents
+ * 
+ * Uses @sparticuz/chromium for Vercel compatibility
  */
 
-import puppeteer from 'puppeteer'
+import puppeteer, { Browser } from 'puppeteer-core'
+import chromium from '@sparticuz/chromium'
 
 export interface PdfOptions {
     format?: 'Letter' | 'A4'
@@ -19,6 +22,57 @@ export interface PdfOptions {
 }
 
 /**
+ * Get browser instance - handles both local and Vercel environments
+ */
+async function getBrowser(): Promise<Browser> {
+    // Check if running on Vercel/AWS Lambda
+    const isVercel = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_VERSION
+    
+    if (isVercel) {
+        console.log('[PDF Generator] Running on Vercel - using @sparticuz/chromium')
+        return puppeteer.launch({
+            args: chromium.args,
+            executablePath: await chromium.executablePath(),
+            headless: true,
+        })
+    } else {
+        console.log('[PDF Generator] Running locally - using local Chrome')
+        // For local development, try to find Chrome
+        const possiblePaths = [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium-browser',
+        ]
+        
+        let executablePath: string | undefined
+        const fs = await import('fs')
+        for (const path of possiblePaths) {
+            if (fs.existsSync(path)) {
+                executablePath = path
+                break
+            }
+        }
+        
+        if (!executablePath) {
+            throw new Error('Could not find Chrome. Please install Google Chrome for local PDF generation.')
+        }
+        
+        return puppeteer.launch({
+            executablePath,
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+            ],
+        })
+    }
+}
+
+/**
  * Generate a PDF from HTML content
  * @param html - The complete HTML document to convert
  * @param options - PDF generation options
@@ -30,17 +84,7 @@ export async function generatePdfFromHtml(
 ): Promise<Buffer> {
     console.log('[PDF Generator] Launching browser...')
     
-    // Launch headless browser
-    const browser = await puppeteer.launch({
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--font-render-hinting=none',
-        ],
-    })
+    const browser = await getBrowser()
     
     try {
         console.log('[PDF Generator] Creating page...')
