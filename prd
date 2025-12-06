@@ -1,0 +1,1277 @@
+# RFP Proposal Generator - PRD for Blink (10 Prompts)
+
+## **Product Overview**
+AI-powered web app that generates 100+ page government proposals in 5-10 minutes. Users upload RFP PDFs, system extracts requirements, pulls company data from Supabase, generates all proposal sections in parallel using Claude API, and outputs professional HTML documents.
+
+---
+
+## **Application Flow**
+
+### **Page 1: Upload & Generate**
+
+**Layout:**
+- Header: "RFP Proposal Generator"
+- Large upload dropzone: "Drop RFP PDF here or click to browse"
+- After upload shows: filename, size, page count, text preview (first 1000 chars)
+- Company dropdown: populated from `companies` table (show name + certifications)
+- Optional email input: "Email for notification (optional)"
+- Primary button: "Generate Proposal" (disabled until PDF uploaded + company selected)
+
+**Actions:**
+- PDF upload → extract text client-side (use pdf.js library)
+- Click Generate → POST to `/api/proposals/create` with {rfp_text, company_id, email}
+- API returns {job_id} immediately
+- Redirect to Progress page with job_id
+
+---
+
+### **Page 2: Progress & Results**
+
+**Initial State (Generation in Progress):**
+- Header: "Generating Your Proposal" + Job ID
+- Large circular progress bar (0-100%)
+- Status text: "Analyzing RFP requirements..." (updates every 5 seconds)
+- Detailed checklist (plain text):
+  ```
+  RFP Analysis - Complete
+  Company Data Loaded - Complete
+  Executive Summary - In Progress (33%)
+  Technical Approach - Pending
+  Management Approach - Pending
+  Past Performance - Pending
+  Compliance Matrix - Pending
+  ```
+- Estimated time remaining
+- Auto-refresh every 5 seconds via GET `/api/proposals/status/:jobId`
+
+**Complete State (status = "completed"):**
+- Success banner: "Your Proposal is Ready!"
+- Summary table:
+  | Field | Value |
+  |-------|-------|
+  | RFP Number | VA-243-25-RFP-0089 |
+  | Agency | Department of Veterans Affairs |
+  | Total Pages | 147 |
+  | Contract Value | $6.3M |
+  | Generated | December 3, 2024 2:45 PM |
+- Executive Summary preview (first 500 words)
+- Download buttons: "Download as HTML" (primary), "Copy to Clipboard" (secondary)
+- Full document viewer (expandable, shows complete HTML with tables)
+- "Generate Another Proposal" button
+
+---
+
+## **Backend Processing**
+
+**API Endpoint: POST /api/proposals/create**
+1. Receive: {rfp_text, company_id, email}
+2. Generate unique job_id
+3. Insert into `proposal_jobs` table: {job_id, company_id, status: "processing", progress_percent: 0}
+4. Return {job_id} immediately
+5. Start background job:
+
+**Background Job Flow:**
+```
+Step 1: Extract RFP Data (1 Claude call, ~2 min)
+- Update: progress=10%, current_step="Analyzing RFP"
+
+Step 2: Fetch Company Data (~5 sec)
+- Query: companies, past_performance, personnel, labor_rates
+- Update: progress=15%, current_step="Loading company data"
+
+Step 3: Generate All Sections IN PARALLEL (9 Claude calls, ~5-7 min)
+- Executive Summary
+- Technical Approach (covers all 9 tasks)
+- Management Approach (covers all 5 sections)
+- Past Performance Volume (covers all 5 contracts)
+- Compliance Matrix
+- Update progress as each completes
+
+Step 4: Assemble Document (~30 sec)
+- Combine sections, add styling, calculate pricing
+- Update: progress=95%
+
+Step 5: Finalize (~10 sec)
+- Save to database, status="completed"
+- Send email if provided
+```
+
+**Total: 10 Claude API calls, 5-10 minutes**
+
+---
+
+## **Database Usage (Supabase)**
+
+**Read from:**
+- `companies` - company profile
+- `past_performance` - all contract records
+- `personnel` - all employee records
+- `labor_rates` - all pricing categories
+
+**Write to `proposal_jobs`:**
+```sql
+{
+  job_id, company_id, status, progress_percent, current_step,
+  sections_completed, rfp_metadata, executive_summary,
+  technical_approach, management_approach, past_performance_volume,
+  compliance_matrix, pricing, created_at, completed_at
+}
+```
+
+---
+
+## **Complete AI Prompts (10 Total)**
+
+### **Prompt 1: RFP Data Extraction**
+```
+System: You are an expert at extracting structured data from government RFPs. Return only valid JSON with no markdown.
+
+User:
+Extract the following data from this RFP and return ONLY as valid JSON:
+
+{
+  "metadata": {
+    "agency": "agency name",
+    "solicitationNum": "solicitation number",
+    "deadline": "deadline with time and timezone"
+  },
+  "sectionL": {
+    "volumes": [{"name": "volume name", "pageLimit": number}],
+    "formatting": {"font": "font requirements", "margins": "margin requirements"}
+  },
+  "sectionM": {
+    "factors": [{"name": "evaluation factor", "weight": percentage}]
+  },
+  "sectionC": {
+    "requirements": ["task 1 full text", "task 2 full text", "...all tasks"]
+  },
+  "sectionB": {
+    "clins": [{"clin": "number", "description": "desc", "quantity": "qty"}]
+  }
+}
+
+RFP TEXT:
+[INSERT FULL RFP TEXT]
+```
+
+---
+
+### **Prompt 2: Executive Summary**
+```
+System: You are an expert government proposal writer. Use tables to organize information clearly.
+
+User:
+RFP: [solicitationNum] for [agency], Deadline: [deadline]
+
+COMPANY:
+Name: [company.name]
+Type: [business_type]
+Certifications: [certifications]
+DUNS: [duns], CAGE: [cage_code]
+Employees: [employee_count], Founded: [founded_year]
+Capabilities: [capabilities_statement]
+
+PAST PERFORMANCE (5 contracts):
+[project_name] - [agency]: $[contract_value] ([start_date] to [end_date])
+Performance: [performance_summary]
+[...repeat for all 5]
+
+KEY PERSONNEL (top 3):
+[name], [title]: [years_experience] years, Clearance: [clearance_level]
+Expertise: [expertise], Certs: [certifications]
+[...repeat for 3]
+
+Generate 3-page Executive Summary with:
+
+1. UNDERSTANDING (1 page)
+   - Agency mission alignment
+   - RFP objectives summary
+   - Key challenges identified
+
+2. VALUE PROPOSITION (1 page)
+   - Company qualifications table:
+     | Requirement | Our Capability | Differentiator |
+   - Emphasize [business_type] status
+   - Highlight certifications
+
+3. APPROACH OVERVIEW (1 page)
+   - Technical approach summary
+   - Management structure
+   - Past performance table:
+     | Project | Agency | Value | Key Results | Relevance |
+   - Include quantifiable achievements (%, $, time)
+
+Use professional tone. Return as HTML with h1/h2/h3 and tables.
+```
+
+---
+
+### **Prompt 3: Technical Approach (All 9 Tasks)**
+```
+System: You are an expert government proposal technical writer. Use tables extensively.
+
+User:
+RFP TASKS (9 total from Section C):
+Task 1: [requirements[0]]
+Task 2: [requirements[1]]
+Task 3: [requirements[2]]
+Task 4: [requirements[3]]
+Task 5: [requirements[4]]
+Task 6: [requirements[5]]
+Task 7: [requirements[6]]
+Task 8: [requirements[7]]
+Task 9: [requirements[8]]
+
+COMPANY: [capabilities_statement]
+
+PAST PERFORMANCE (relevant projects):
+[Filter for cloud/migration/technical projects]
+[project_name]: [scope] - [performance_summary]
+[...all relevant]
+
+TECHNICAL PERSONNEL:
+[Filter for architects, developers, engineers]
+[name], [title]: [expertise], [certifications], [years_experience] years
+[...all technical staff]
+
+Generate 50-page Technical Approach addressing ALL 9 tasks.
+
+For EACH task, provide:
+
+**TASK [X]: [Task Name]**
+
+1. UNDERSTANDING (0.5 pages)
+   - Restate requirement
+   - Key objectives
+
+2. TECHNICAL SOLUTION (3 pages)
+   - Detailed methodology
+   - Tools/technologies table:
+     | Component | Technology | Version | Rationale |
+   - Implementation phases table:
+     | Phase | Duration | Activities | Deliverables | Dependencies |
+   - Architecture/design approach
+   - Integration strategy
+
+3. TECHNICAL DETAILS (1.5 pages)
+   - Specific configurations
+   - Data flows
+   - Security controls
+   - Performance optimization
+
+4. QUALITY ASSURANCE (0.5 pages)
+   - Testing approach
+   - Validation criteria
+   - Success metrics table:
+     | Metric | Target | Measurement |
+
+5. RISKS & MITIGATION (0.5 pages)
+   - Risk table:
+     | Risk | Likelihood | Impact | Mitigation | Contingency |
+
+6. RELEVANT EXPERIENCE (0.5 pages)
+   - Reference specific past projects
+   - Quantifiable results
+   - Lessons applied
+
+After all 9 tasks, add:
+
+**TECHNICAL SUMMARY TABLE**
+| Task | Approach | Key Technologies | Timeline | Lead Personnel |
+
+Return as HTML with extensive tables throughout. Each task should be 5-6 pages.
+```
+
+---
+
+### **Prompt 4: Management Approach (All 5 Sections)**
+```
+System: You are an expert in federal program management. Use comprehensive tables.
+
+User:
+RFP: Management weighted at [find Management weight from sectionM]%
+EVALUATION FACTORS: [all sectionM.factors]
+
+PROGRAM MANAGER:
+[Find PM from personnel]
+Name: [name], Experience: [years_experience] years
+Certifications: [certifications]
+Resume: [resume_summary]
+
+ALL PERSONNEL:
+[Loop all personnel with role, experience, clearance]
+
+LABOR RATES & CLINS:
+[All labor_rates with category and hourly_rate]
+[All sectionB.clins]
+
+Generate 30-page Management Approach covering ALL 5 sections:
+
+---
+
+**SECTION 1: PROJECT MANAGEMENT METHODOLOGY (6 pages)**
+
+1.1 Framework
+   - Agile/Scrum for federal projects
+   - PMBOK alignment
+   - Framework table:
+     | PMBOK Area | Our Approach | Tools | Deliverables |
+
+1.2 Schedule Management
+   - IMS development
+   - 2-week sprints
+   - Project phases table:
+     | Phase | Duration | Milestones | Dependencies | Resources |
+   - Critical path methodology
+
+1.3 Earned Value Management
+   - EVM metrics table:
+     | Metric | Formula | Threshold | Action |
+   - Monthly reporting format
+   - Variance analysis
+
+1.4 Risk & Issue Management
+   - Risk process table:
+     | Step | Activity | Frequency | Owner | Tool |
+   - Issue escalation matrix
+
+1.5 Change Control
+   - CCB structure
+   - Change request workflow table
+
+1.6 Communications
+   - Communication matrix:
+     | Stakeholder | Type | Frequency | Format | Owner |
+   - Meeting agendas
+
+---
+
+**SECTION 2: ORGANIZATIONAL STRUCTURE & STAFFING (8 pages)**
+
+2.1 Organization Chart
+   - Reporting hierarchy table:
+     | Role | Reports To | Direct Reports |
+
+2.2 Staffing Plan
+   - Full staffing matrix:
+     | Labor Category | CLIN | FTEs | Rate | Annual Cost | Clearance |
+   - Phase staffing table:
+     | Phase | Month 1 | Month 2 | Month 3 | ... | Total FTEs |
+
+2.3 Key Personnel Resumes (3 detailed resumes)
+   
+   **[PM Name] - Program Manager**
+   Education: [table with degree, institution, year]
+   Certifications: [list]
+   Experience: [years_experience] years in [expertise]
+   [resume_summary]
+   Relevant Projects: [table with project, role, duration, achievements]
+   Role on This Contract: [specific responsibilities]
+   
+   **[Architect Name] - Technical Lead**
+   [Same detailed format]
+   
+   **[Security Name] - Security Lead**
+   [Same detailed format]
+
+2.4 Labor Category Descriptions
+   | Category | Qualifications | Duties | Min Education | Clearance |
+
+2.5 Transition & Onboarding
+   - 30-60-90 day plan table
+
+---
+
+**SECTION 3: RISK MANAGEMENT (5 pages)**
+
+3.1 Risk Framework
+   - Process table:
+     | Process | Description | Frequency | Tools | Owner |
+
+3.2 Risk Assessment Matrix
+   - Probability scale table (1-5)
+   - Impact scale table (1-5)
+   - Risk scoring methodology
+
+3.3 Program Risk Register (Top 10 Risks)
+   Comprehensive table:
+   | ID | Risk | Category | Prob | Impact | Score | Mitigation | Contingency | Owner | Status |
+   
+   Include risks across:
+   - Technical, Schedule, Budget, Security, Operational
+
+3.4 Risk Monitoring
+   - Monitoring schedule table:
+     | Activity | Frequency | Participants | Deliverable |
+
+---
+
+**SECTION 4: QUALITY ASSURANCE (6 pages)**
+
+4.1 QA Framework
+   - Framework table:
+     | Component | Standard | Implementation | Metrics |
+
+4.2 Quality Control
+   - QC activities table:
+     | Process | Frequency | Criteria | Tools | Owner |
+
+4.3 Testing Strategy
+   - Comprehensive testing table:
+     | Test Level | Scope | Approach | Tools | Entry | Exit | Owner |
+   (Include: Unit, Integration, System, UAT, Security, Performance)
+
+4.4 Defect Management
+   - Defect lifecycle table:
+     | Severity | Response Time | Resolution Time | Escalation |
+
+4.5 Quality Metrics
+   - KPI table:
+     | Metric | Target | Measurement | Frequency | Threshold |
+
+---
+
+**SECTION 5: COMMUNICATIONS & REPORTING (5 pages)**
+
+5.1 Communication Matrix
+   | Stakeholder | Type | Purpose | Frequency | Method | Format | Owner |
+
+5.2 Meeting Structures
+   - Weekly Status Meeting agenda table
+   - Monthly Executive Review structure table
+
+5.3 Monthly Progress Report Format
+   - Report sections table:
+     | Section | Content | Pages | Frequency |
+   - Include EVM metrics (BCWS, BCWP, ACWP, SV, CV, SPI, CPI)
+
+5.4 Escalation Procedures
+   | Level | Response Time | Escalation To | Method | Authority |
+
+5.5 Collaboration Tools
+   - Tools table:
+     | Tool | Purpose | Users | Access Level |
+
+Return as HTML with extensive tables. Total 30 pages.
+```
+
+---
+
+### **Prompt 5: Past Performance Volume (All 5 Contracts)**
+```
+System: You are an expert at writing compelling past performance case studies. Use tables for structured data.
+
+User:
+ALL PAST PERFORMANCE CONTRACTS (5 total):
+
+Contract 1:
+[Full JSON of past_performance[0]]
+
+Contract 2:
+[Full JSON of past_performance[1]]
+
+Contract 3:
+[Full JSON of past_performance[2]]
+
+Contract 4:
+[Full JSON of past_performance[3]]
+
+Contract 5:
+[Full JSON of past_performance[4]]
+
+CURRENT RFP:
+Solicitation: [solicitationNum]
+Agency: [agency]
+Requirements: [brief summary of key sectionC requirements]
+
+Generate 25-page Past Performance Volume with detailed case study for EACH contract.
+
+---
+
+For EACH of the 5 contracts, create 5-page case study:
+
+**CONTRACT [X]: [project_name]**
+
+**1. PROJECT OVERVIEW (1 page)**
+
+Basic Information Table:
+| Field | Details |
+|-------|---------|
+| Contract Number | [contract_number] |
+| Agency | [agency] |
+| Contract Value | $[contract_value] |
+| Period of Performance | [start_date] to [end_date] |
+| Contract Type | [infer from data] |
+| NAICS Code | [if available] |
+
+Scope Summary:
+[scope]
+
+Key Objectives:
+- [Extract 3-5 objectives from scope]
+
+**2. TECHNICAL APPROACH (1.5 pages)**
+
+Solutions Implemented:
+[Detailed technical solutions from scope and performance_summary]
+
+Technologies Used:
+| Technology | Purpose | Outcome |
+
+Technical Challenges & Solutions:
+| Challenge | Solution Applied | Result |
+
+**3. PROJECT MANAGEMENT (0.5 pages)**
+
+Management Approach:
+[Extract management details]
+
+Performance Metrics:
+| Metric | Target | Achieved |
+| On-time Delivery | 100% | [from performance_summary] |
+| On-budget | 100% | [from performance_summary] |
+| Quality | [standard] | [achieved] |
+
+**4. RESULTS & ACHIEVEMENTS (1.5 pages)**
+
+Quantifiable Outcomes:
+[Extract specific numbers, percentages, cost savings from performance_summary]
+
+Results Table:
+| Category | Achievement | Business Impact |
+| Cost | [savings/avoidance] | [impact] |
+| Schedule | [early/on-time] | [impact] |
+| Performance | [improvements] | [impact] |
+| Quality | [ratings/metrics] | [impact] |
+
+Awards & Recognition:
+[Any awards mentioned in performance_summary]
+
+Customer Satisfaction:
+[Extract satisfaction data]
+
+**5. RELEVANCE TO CURRENT RFP (0.5 pages)**
+
+Relevance Analysis Table:
+| RFP Requirement | How This Project Addresses It | Transferable Experience |
+
+Similarities:
+- Agency type: [compare agencies]
+- Technical scope: [compare technical requirements]
+- Contract size: [compare values]
+- Complexity: [compare complexity factors]
+
+Lessons Learned Applied:
+- [Key lesson 1] → [How it benefits current RFP]
+- [Key lesson 2] → [How it benefits current RFP]
+- [Key lesson 3] → [How it benefits current RFP]
+
+**6. CUSTOMER REFERENCE**
+
+Point of Contact Table:
+| Field | Information |
+|-------|-------------|
+| Name | [poc_name] |
+| Title | [poc title if available] |
+| Email | [poc_email] |
+| Phone | [poc_phone] |
+| Relationship | [role during contract] |
+
+---
+
+After all 5 case studies, add:
+
+**PAST PERFORMANCE SUMMARY TABLE**
+| Project | Agency | Value | Period | Relevance Score | Key Outcomes |
+
+Return as HTML with comprehensive tables. Each contract = 5 pages, total 25 pages.
+```
+
+---
+
+### **Prompt 6: Compliance Matrix**
+```
+System: You are an expert at creating comprehensive compliance matrices for government proposals.
+
+User:
+RFP REQUIREMENTS:
+
+SECTION L - VOLUMES:
+[All sectionL.volumes with name and pageLimit]
+
+SECTION L - FORMATTING:
+Font: [formatting.font]
+Margins: [formatting.margins]
+
+SECTION M - EVALUATION FACTORS:
+[All factors with name and weight]
+
+SECTION C - REQUIREMENTS (All Tasks):
+Task 1: [requirements[0]]
+Task 2: [requirements[1]]
+[...all 9 tasks]
+
+SECTION B - CLINS:
+[All clins with clin number, description, quantity]
+
+Generate comprehensive Compliance Matrix as HTML table.
+
+Create large table with columns:
+| RFP Section | Requirement ID | Requirement Description | Compliance Status | Proposal Section Reference | Page Number | Notes |
+
+Include rows for:
+
+**SECTION L REQUIREMENTS:**
+- Volume I page limit: [limit] pages | Fully Compliant | Volume I | Pages 1-50 | [actual pages]
+- Volume II page limit: [limit] pages | Fully Compliant | Volume II | Pages 51-80 | [actual pages]
+- Volume III page limit: [limit] pages | Fully Compliant | Volume III | Pages 81-105 | [actual pages]
+- Volume IV page limit: [limit] pages | Fully Compliant | Volume IV | Pages 106-110 | [actual pages]
+- Font: [font requirement] | Fully Compliant | All volumes | All pages | [font used]
+- Margins: [margin requirement] | Fully Compliant | All volumes | All pages | [margins used]
+
+**SECTION M REQUIREMENTS:**
+For each evaluation factor:
+- [Factor name] ([weight]%) | Fully Compliant | [Corresponding volume] | Pages [X-Y] | Comprehensive response provided
+
+**SECTION C REQUIREMENTS:**
+For each of 9 tasks:
+- Task [X]: [Brief task description] | Fully Compliant | Volume I, Task [X] | Pages [X-Y] | Detailed technical approach, methodology, and relevant experience provided
+
+**SECTION B REQUIREMENTS:**
+For each CLIN:
+- CLIN [number]: [description] | Fully Compliant | Volume II Staffing Plan + Volume IV Pricing | Pages [X-Y] | [Quantity] FTEs proposed, labor rates provided
+
+**CROSS-REFERENCES:**
+Add additional rows for any cross-cutting requirements:
+- Security requirements | Fully Compliant | Volume I Task 6, Volume II Section 4 | Pages [X-Y] | FedRAMP authorization approach
+- Past performance | Fully Compliant | Volume III | Pages [X-Y] | 5 relevant contracts provided
+- Key personnel | Fully Compliant | Volume II Section 2.3 | Pages [X-Y] | 3 detailed resumes included
+
+Use professional table formatting with borders, proper alignment, and alternating row colors for readability.
+
+Return as HTML table only.
+```
+
+---
+
+### **Prompt 7: Cover Page & Table of Contents**
+```
+System: You are an expert at creating professional government proposal cover pages and tables of contents.
+
+User:
+RFP: [metadata.solicitationNum]
+AGENCY: [metadata.agency]
+DEADLINE: [metadata.deadline]
+
+COMPANY:
+Name: [company.name]
+Address: [address as JSON]
+DUNS: [duns]
+CAGE Code: [cage_code]
+UEI: [uei]
+Business Type: [business_type]
+
+VOLUMES REQUIRED:
+[All sectionL.volumes]
+
+Generate professional Cover Page and Table of Contents.
+
+**COVER PAGE**
+Create centered, professional layout:
+
+[COMPANY LOGO PLACEHOLDER]
+
+TECHNICAL PROPOSAL
+
+IN RESPONSE TO
+
+[metadata.solicitationNum]
+[Full RFP title if extractable]
+
+FOR
+
+[metadata.agency]
+
+SUBMITTED BY
+
+[company.name]
+[address.street]
+[address.city], [address.state] [address.zip]
+
+DUNS: [duns]
+CAGE Code: [cage_code]
+UEI: [uei]
+Business Classification: [business_type]
+
+SUBMITTED: [Current date]
+DEADLINE: [metadata.deadline]
+
+**TABLE OF CONTENTS**
+
+VOLUME I: TECHNICAL APPROACH
+
+Executive Summary.............................1
+1.0 Understanding of Requirements..............4
+2.0 Technical Approach........................10
+    2.1 Task 1: Program Management............11
+    2.2 Task 2: Cloud Migration Planning......17
+    2.3 Task 3: AWS Infrastructure............23
+    2.4 Task 4: Application Migration.........29
+    2.5 Task 5: DevSecOps....................35
+    2.6 Task 6: FedRAMP Authorization........40
+    2.7 Task 7: Data Migration...............46
+    2.8 Task 8: Training.....................52
+    2.9 Task 9: Operations...................57
+
+VOLUME II: MANAGEMENT APPROACH
+
+3.0 Management Approach.......................63
+    3.1 Project Management Methodology........64
+    3.2 Organizational Structure & Staffing...70
+    3.3 Risk Management......................78
+    3.4 Quality Assurance....................83
+    3.5 Communications & Reporting...........89
+
+VOLUME III: PAST PERFORMANCE
+
+4.0 Past Performance.........................95
+    4.1 Contract 1: [project_name[0]]........96
+    4.2 Contract 2: [project_name[1]]........101
+    4.3 Contract 3: [project_name[2]]........106
+    4.4 Contract 4: [project_name[3]]........111
+    4.5 Contract 5: [project_name[4]]........116
+    4.6 Past Performance Summary Table.......121
+
+VOLUME IV: PRICE PROPOSAL
+
+5.0 Pricing..................................122
+    5.1 Pricing Summary Table................123
+    5.2 Labor Rates by Category..............124
+    5.3 CLIN Breakdown.......................125
+    5.4 Pricing Narrative....................127
+
+APPENDICES
+
+Appendix A: Compliance Matrix................128
+Appendix B: Key Personnel Resumes............135
+Appendix C: Company Certifications...........145
+
+Return as HTML with professional styling.
+```
+
+---
+
+### **Prompt 8: Pricing Volume**
+```
+System: You are an expert at creating federal contract pricing proposals with accurate calculations.
+
+User:
+CLINS FROM RFP:
+[All sectionB.clins with clin, description, quantity]
+
+LABOR RATES:
+[All labor_rates with category and hourly_rate]
+
+STAFFING REQUIREMENTS:
+Based on Technical Approach, estimated staffing:
+- Program Management: 2 FTEs
+- Cloud Architecture: 4 FTEs
+- Software Development: 6 FTEs
+- Cybersecurity: 3 FTEs
+- Data Engineering: 2 FTEs
+- DevOps: 2 FTEs
+- Training: 1 FTE
+
+CONTRACT PERIOD: Base year + 4 option years (5 years total)
+HOURS PER FTE: 2080 hours/year
+
+Generate complete Pricing Volume (10-15 pages).
+
+**1. PRICING SUMMARY (1 page)**
+
+Total Contract Value Table:
+| Period | Value | Cumulative |
+|--------|-------|------------|
+| Base Year | $[calculated] | $[calculated] |
+| Option Year 1 | $[calculated] | $[calculated] |
+| Option Year 2 | $[calculated] | $[calculated] |
+| Option Year 3 | $[calculated] | $[calculated] |
+| Option Year 4 | $[calculated] | $[calculated] |
+| **TOTAL** | **$[total]** | - |
+
+**2. LABOR RATES (2 pages)**
+
+Fully Burdened Labor Rates Table:
+| Labor Category | Base Hourly Rate | Fringe (30%) | Overhead (40%) | G&A (15%) | Profit (10%) | Fully Loaded Rate |
+|----------------|------------------|--------------|----------------|-----------|--------------|-------------------|
+| [category 1] | $[rate] | $[calc] | $[calc] | $[calc] | $[calc] | $[total] |
+[...all 15 labor categories]
+
+Rate Escalation:
+- Base Year: Rates as shown
+- Option Years: 3% annual escalation
+
+Escalation Table:
+| Labor Category | Base | OY1 (+3%) | OY2 (+3%) | OY3 (+3%) | OY4 (+3%) |
+
+**3. CLIN BREAKDOWN (4 pages)**
+
+For each CLIN:
+
+**CLIN [number]: [description]**
+
+Staffing Table:
+| Labor Category | FTEs | Hours/Year | Rate | Annual Cost |
+|----------------|------|------------|------|-------------|
+| [category] | [FTEs] | [hours] | $[rate] | $[cost] |
+| **TOTAL** | **[total FTEs]** | **[total hours]** | - | **$[total]** |
+
+5-Year Cost Table:
+| Period | Hours | Avg Rate | Cost |
+|--------|-------|----------|------|
+| Base Year | [hours] | $[rate] | $[cost] |
+| Option Year 1 | [hours] | $[rate+3%] | $[cost] |
+| Option Year 2 | [hours] | $[rate+6%] | $[cost] |
+| Option Year 3 | [hours] | $[rate+9%] | $[cost] |
+| Option Year 4 | [hours] | $[rate+12%] | $[cost] |
+| **TOTAL** | **[total]** | - | **$[total]** |
+
+[Repeat for all CLINs]
+
+**4. BASIS OF ESTIMATE (2 pages)**
+
+Assumptions Table:
+| Assumption | Value | Rationale |
+|------------|-------|-----------|
+| Work Year | 2080 hours | Standard government work year |
+| Fringe Rate | 30% | Health, retirement, leave, taxes |
+| Overhead | 40% | Facilities, equipment, indirect staff |
+| G&A | 15% | Corporate management, admin |
+| Profit | 10% | Industry standard for complexity |
+| Escalation | 3% annual | Historical federal wage growth |
+
+Staffing Rationale:
+[Explain why each FTE count is appropriate based on technical approach]
+
+**5. PRICING NARRATIVE (2 pages)**
+
+Explain:
+- Competitive pricing strategy
+- Value proposition
+- Cost control measures
+- Why rates are fair and reasonable
+- Comparison to GSA schedules or similar contracts (if applicable)
+
+Cost Savings Approaches:
+| Approach | Annual Savings | 5-Year Savings |
+|----------|----------------|----------------|
+| Automation | $[amount] | $[amount] |
+| Process efficiency | $[amount] | $[amount] |
+| Cloud optimization | $[amount] | $[amount] |
+| **TOTAL** | **$[amount]** | **$[amount]** |
+
+**6. SUMMARY TABLES**
+
+Total Price by CLIN (All Years):
+| CLIN | Description | Base | OY1 | OY2 | OY3 | OY4 | Total |
+
+Total Price by Labor Category (All Years):
+| Category | Total Hours | Avg Rate | Total Cost |
+
+Return as HTML with extensive tables and clear calculations.
+```
+
+---
+
+### **Prompt 9: Appendices (Certifications & Representations)**
+```
+System: You are an expert at compiling proposal appendices with company documentation.
+
+User:
+COMPANY DATA:
+Name: [company.name]
+DUNS: [duns]
+CAGE Code: [cage_code]
+UEI: [uei]
+Business Type: [business_type]
+Certifications: [certifications]
+Founded: [founded_year]
+Address: [address]
+
+Generate Appendices section (10-15 pages).
+
+**APPENDIX A: COMPANY INFORMATION**
+
+Company Profile Table:
+| Field | Information |
+|-------|-------------|
+| Legal Name | [company.name] |
+| DBA | [if different] |
+| DUNS Number | [duns] |
+| CAGE Code | [cage_code] |
+| UEI | [uei] |
+| Tax ID | [placeholder - to be provided] |
+| Year Established | [founded_year] |
+| Employees | [employee_count] |
+| Annual Revenue | $[annual_revenue] |
+
+Business Classifications Table:
+| Classification | Status | Certification Number | Expiration |
+|----------------|--------|---------------------|------------|
+[For each business_type]:
+| [type] | Active | [if available] | [if available] |
+
+Physical Address:
+[address.street]
+[address.city], [address.state] [address.zip]
+
+**APPENDIX B: CERTIFICATIONS**
+
+ISO 9001:2015:
+- Certification Number: [if available]
+- Issue Date: [placeholder]
+- Expiration: [placeholder]
+- Scope: [describe quality management coverage]
+
+CMMI Level 3:
+- Appraisal Date: [placeholder]
+- Lead Appraiser: [placeholder]
+- Process Areas: [list relevant areas]
+
+FedRAMP 3PAO:
+- Authorization Date: [placeholder]
+- Authorization Number: [placeholder]
+- Scope: [describe assessment capabilities]
+
+AWS Certifications:
+[For each certification in certifications array related to AWS]:
+- Certification: [name]
+- Status: [active/valid]
+
+Create table summarizing all certifications:
+| Certification | Issuing Body | Number | Issue Date | Expiration | Status |
+
+**APPENDIX C: NAICS CODES**
+
+NAICS Codes Table:
+| NAICS Code | Description | Primary/Secondary |
+|------------|-------------|-------------------|
+[For each code in naics_codes]:
+| [code] | [description] | [primary/secondary] |
+
+**APPENDIX D: PAST PERFORMANCE REFERENCES**
+
+Complete Reference Table:
+| Company | Project | POC Name | POC Title | POC Email | POC Phone | Contract Value | Period |
+
+[For all 5 past_performance records]
+
+**APPENDIX E: INSURANCE & BONDING**
+
+Insurance Coverage Table:
+| Type | Coverage Amount | Policy Number | Carrier | Expiration |
+|------|----------------|---------------|---------|------------|
+| General Liability | [placeholder] | [placeholder] | [placeholder] | [placeholder] |
+| Professional Liability | [placeholder] | [placeholder] | [placeholder] | [placeholder] |
+| Cyber Liability | [placeholder] | [placeholder] | [placeholder] | [placeholder] |
+| Workers Compensation | [placeholder] | [placeholder] | [placeholder] | [placeholder] |
+
+Bonding Capacity:
+- Bonding Company: [placeholder]
+- Single Project Capacity: [placeholder]
+- Aggregate Capacity: [placeholder]
+
+**APPENDIX F: REPRESENTATIONS & CERTIFICATIONS**
+
+Standard Form 1449/1442 Representations:
+[Create checklist format]
+
+□ Small Business
+□ Small Disadvantaged Business  
+□ Women-Owned Small Business
+□ Veteran-Owned Small Business
+□ Service-Disabled Veteran-Owned Small Business
+□ HUBZone Small Business
+□ 8(a) Program Participant
+
+[Check appropriate boxes based on business_type]
+
+Additional Certifications:
+□ FAR 52.209-5 - Representation by Corporations Regarding Delinquent Tax Liability
+□ FAR 52.203-18 - Prohibition on Contracting with Entities Requiring Confidentiality Agreements
+□ FAR 52.204-26 - Covered Telecommunications Equipment or Services
+
+Return as HTML with comprehensive tables.
+```
+
+---
+
+### **Prompt 10: Final Assembly & Formatting**
+```
+System: You are an expert at assembling professional government proposals with proper formatting and styling.
+
+User:
+You will receive all generated sections. Assemble them into single cohesive HTML document with professional styling.
+
+FORMATTING REQUIREMENTS FROM RFP:
+Font: [sectionL.formatting.font]
+Margins: [sectionL.formatting.margins]
+Page Limits: [sectionL.volumes array]
+
+SECTIONS TO ASSEMBLE:
+1. Cover Page & TOC
+2. Executive Summary
+3. Technical Approach (50 pages)
+4. Management Approach (30 pages)
+5. Past Performance (25 pages)
+6. Pricing (15 pages)
+7. Compliance Matrix
+8. Appendices (15 pages)
+
+Generate complete HTML document with:
+
+**HTML STRUCTURE:**
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Technical Proposal - [solicitationNum] - [company.name]</title>
+<style>
+body {
+  font-family: [extract primary font from formatting.font], Arial, sans-serif;
+  font-size: 12pt;
+  line-height: 1.6;
+  color: #000;
+  margin: [extract from formatting.margins];
+  max-width: 8.5in;
+}
+
+/* Headers */
+h1 {
+  font-size: 18pt;
+  font-weight: bold;
+  margin-top: 24pt;
+  margin-bottom: 12pt;
+  page-break-before: always;
+  border-bottom: 2px solid #000;
+  padding-bottom: 6pt;
+}
+
+h2 {
+  font-size: 14pt;
+  font-weight: bold;
+  margin-top: 18pt;
+  margin-bottom: 10pt;
+  color: #1a1a1a;
+}
+
+h3 {
+  font-size: 12pt;
+  font-weight: bold;
+  margin-top: 12pt;
+  margin-bottom: 8pt;
+  color: #333;
+}
+
+/* Tables */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12pt 0;
+  font-size: 11pt;
+}
+
+th {
+  background-color: #2c5282;
+  color: white;
+  font-weight: bold;
+  padding: 8pt;
+  text-align: left;
+  border: 1px solid #1a365d;
+}
+
+td {
+  padding: 6pt 8pt;
+  border: 1px solid #ccc;
+  vertical-align: top;
+}
+
+tr:nth-child(even) {
+  background-color: #f7fafc;
+}
+
+/* Page breaks */
+.page-break {
+  page-break-after: always;
+}
+
+.volume-break {
+  page-break-before: always;
+  margin-top: 0;
+}
+
+/* Cover page */
+.cover-page {
+  text-align: center;
+  margin-top: 100pt;
+}
+
+.cover-page h1 {
+  border: none;
+  font-size: 24pt;
+  margin: 20pt 0;
+}
+
+/* Table of contents */
+.toc {
+  margin: 20pt 0;
+}
+
+.toc-entry {
+  margin: 6pt 0;
+  display: flex;
+  justify-content: space-between;
+}
+
+.toc-dots {
+  flex-grow: 1;
+  border-bottom: 1px dotted #999;
+  margin: 0 10pt;
+}
+
+/* Headers and footers */
+.header {
+  text-align: right;
+  font-size: 10pt;
+  color: #666;
+  margin-bottom: 12pt;
+  padding-bottom: 6pt;
+  border-bottom: 1px solid #ccc;
+}
+
+.footer {
+  text-align: center;
+  font-size: 10pt;
+  color: #666;
+  margin-top: 24pt;
+  padding-top: 6pt;
+  border-top: 1px solid #ccc;
+}
+
+@media print {
+  body { margin: [formatting.margins]; }
+  .page-break { page-break-after: always; }
+  .volume-break { page-break-before: always; }
+}
+</style>
+</head>
+<body>
+
+<!-- Insert Cover Page -->
+[Cover Page HTML from Prompt 7]
+
+<div class="page-break"></div>
+
+<!-- Insert Table of Contents -->
+[TOC HTML from Prompt 7]
+
+<div class="page-break"></div>
+
+<!-- Insert Executive Summary -->
+<div class="header">[solicitationNum] - [company.name] - Executive Summary</div>
+[Executive Summary HTML from Prompt 2]
+<div class="footer">Page 1-3</div>
+
+<div class="page-break volume-break"></div>
+
+<!-- Insert Technical Approach -->
+<div class="header">[solicitationNum] - [company.name] - Volume I: Technical Approach</div>
+<h1>VOLUME I: TECHNICAL APPROACH</h1>
+[Technical Approach HTML from Prompt 3]
+<div class="footer">Pages 4-53</div>
+
+<div class="page-break volume-break"></div>
+
+<!-- Insert Management Approach -->
+<div class="header">[solicitationNum] - [company.name] - Volume II: Management Approach</div>
+<h1>VOLUME II: MANAGEMENT APPROACH</h1>
+[Management Approach HTML from Prompt 4]
+<div class="footer">Pages 54-83</div>
+
+<div class="page-break volume-break"></div>
+
+<!-- Insert Past Performance -->
+<div class="header">[solicitationNum] - [company.name] - Volume III: Past Performance</div>
+<h1>VOLUME III: PAST PERFORMANCE</h1>
+[Past Performance HTML from Prompt 5]
+<div class="footer">Pages 84-108</div>
+
+<div class="page-break volume-break"></div>
+
+<!-- Insert Pricing -->
+<div class="header">[solicitationNum] - [company.name] - Volume IV: Price Proposal</div>
+<h1>VOLUME IV: PRICE PROPOSAL</h1>
+[Pricing HTML from Prompt 8]
+<div class="footer">Pages 109-123</div>
+
+<div class="page-break volume-break"></div>
+
+<!-- Insert Compliance Matrix -->
+<div class="header">[solicitationNum] - [company.name] - Appendix A: Compliance Matrix</div>
+<h1>APPENDIX A: COMPLIANCE MATRIX</h1>
+[Compliance Matrix HTML from Prompt 6]
+<div class="footer">Pages 124-127</div>
+
+<div class="page-break"></div>
+
+<!-- Insert Appendices -->
+<div class="header">[solicitationNum] - [company.name] - Appendices</div>
+[Appendices HTML from Prompt 9]
+<div class="footer">Pages 128-142</div>
+
+</body>
+</html>
+```
+
+Ensure:
+- All sections flow logically
+- Page numbers are sequential
+- Headers/footers on every page
+- Tables are properly formatted
+- Page breaks between major sections
+- Professional appearance throughout
+- Compliant with RFP formatting requirements
+
+Return complete assembled HTML document.
+```
+
+---
+
+## **Technical Implementation**
+
+**PDF Processing:**
+- Use pdf.js library client-side
+- Extract plain text only
+
+**Background Processing:**
+- Run all 10 Claude calls (1 extraction + 9 generation)
+- Use Promise.all() for parallel execution of generation prompts (2-9)
+- Assembly (prompt 10) runs after all others complete
+
+**Progress Tracking:**
+- Update database as each prompt completes
+- Frontend polls every 5 seconds
+- Show completion percentage (10% per prompt)
+
+**Error Handling:**
+- Retry failed API calls up to 3 times
+- Log all errors
+- Show user-friendly error messages
+
+**Total Time: 5-10 minutes**
+**Total Cost: $2.50-$3.50 per proposal**
+
+---
+
+**End of PRD - Ready for Blink.ai**
