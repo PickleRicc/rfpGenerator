@@ -2,6 +2,10 @@ import { supabase } from '@/lib/supabase'
 import { generateProposalPdf } from '@/lib/pdf-generator'
 import { NextRequest, NextResponse } from 'next/server'
 
+// Vercel serverless function config for Puppeteer
+export const maxDuration = 60 // 60 seconds timeout
+export const dynamic = 'force-dynamic'
+
 export async function GET(
     request: NextRequest,
     { params }: { params: Promise<{ jobId: string }> }

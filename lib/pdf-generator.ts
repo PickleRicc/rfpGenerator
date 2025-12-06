@@ -3,10 +3,10 @@
  * Converts HTML proposals to professionally formatted PDF documents
  * 
  * Uses @sparticuz/chromium for Vercel compatibility
+ * NOTE: Dynamic imports required for serverless environments
  */
 
-import puppeteer, { Browser } from 'puppeteer-core'
-import chromium from '@sparticuz/chromium'
+import type { Browser } from 'puppeteer-core'
 
 export interface PdfOptions {
     format?: 'Letter' | 'A4'
@@ -25,11 +25,16 @@ export interface PdfOptions {
  * Get browser instance - handles both local and Vercel environments
  */
 async function getBrowser(): Promise<Browser> {
+    // Dynamic imports to prevent build issues
+    const puppeteer = (await import('puppeteer-core')).default
+    
     // Check if running on Vercel/AWS Lambda
     const isVercel = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_VERSION
     
     if (isVercel) {
         console.log('[PDF Generator] Running on Vercel - using @sparticuz/chromium')
+        const chromium = (await import('@sparticuz/chromium')).default
+        
         return puppeteer.launch({
             args: chromium.args,
             executablePath: await chromium.executablePath(),
