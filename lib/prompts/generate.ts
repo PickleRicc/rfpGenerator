@@ -7,6 +7,55 @@
 import { NormalizedCompanyData } from '../utils/normalize-data'
 import { RfpAnalysis } from './analyze-rfp'
 
+// ============================================================================
+// HTML SANITIZATION - Fix broken tables
+// ============================================================================
+
+/**
+ * Fix common HTML table issues that cause formatting problems
+ * - Ensures all tables are properly closed
+ * - Removes section headers that got stuck inside table cells
+ * - Balances table row and cell tags
+ */
+export function sanitizeHtmlContent(html: string): string {
+    let result = html
+    
+    // Step 0: Strip markdown code fences that Claude sometimes outputs
+    result = result.replace(/^```html?\s*/i, '')  // Remove opening ```html or ```
+    result = result.replace(/```\s*$/i, '')       // Remove closing ```
+    result = result.trim()
+    
+    // Step 1: Close any unclosed tables before h1/h2 tags
+    // This catches cases where Claude forgets to close a table before starting a new section
+    result = result.replace(/(<\/td>\s*<\/tr>\s*)(<h[12][^>]*>)/gi, '$1</tbody></table>\n\n$2')
+    result = result.replace(/(<\/th>\s*<\/tr>\s*)(<h[12][^>]*>)/gi, '$1</thead></table>\n\n$2')
+    
+    // Step 2: Remove any h1/h2/h3 tags that appear inside table cells
+    // This prevents section headers from being squeezed into narrow columns
+    const headerInCellPattern = /<t[dh][^>]*>\s*(<h[123][^>]*>.*?<\/h[123]>)\s*<\/t[dh]>/gi
+    result = result.replace(headerInCellPattern, '</td></tr></tbody></table>\n\n$1\n\n<table><tbody><tr><td>')
+    
+    // Step 3: Count opening and closing table tags and balance them
+    const openTables = (result.match(/<table[^>]*>/gi) || []).length
+    const closeTables = (result.match(/<\/table>/gi) || []).length
+    
+    if (openTables > closeTables) {
+        // Add missing closing tags at the end
+        for (let i = 0; i < openTables - closeTables; i++) {
+            result += '\n</tbody></table>'
+        }
+    }
+    
+    // Step 4: Ensure tables have tbody if they have rows but no tbody
+    result = result.replace(/<table([^>]*)>\s*<tr>/gi, '<table$1><tbody><tr>')
+    result = result.replace(/<\/tr>\s*<\/table>/gi, '</tr></tbody></table>')
+    
+    // Step 5: Remove any completely empty table cells that might cause issues
+    result = result.replace(/<td[^>]*>\s*<\/td>/gi, '<td>&nbsp;</td>')
+    
+    return result
+}
+
 // Helper to format company data for prompts
 function formatCompanyContext(companyData: NormalizedCompanyData): string {
     const { company, pastPerformance, personnel, laborRates } = companyData
@@ -43,7 +92,14 @@ export function createExecutiveSummaryPrompt(
     companyData: NormalizedCompanyData
 ): { system: string; userPrompt: string } {
     return {
-        system: `You are an expert government proposal writer. Generate professional HTML content with tables.`,
+        system: `You are an expert government proposal writer. Generate professional HTML content with tables.
+
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr> MUST have a closing </tr> tag  
+- Every <td> and <th> MUST have closing tags
+- NEVER put section headers (h1, h2, h3) inside table cells
+- Complete ALL table content before moving to the next topic`,
         userPrompt: `Generate an EXECUTIVE SUMMARY (2-3 pages) for this RFP response.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum} - ${rfpAnalysis.metadata.title}
@@ -62,6 +118,7 @@ Generate HTML with:
 4. Past performance highlights table (Project | Agency | Value | Relevance)
 5. Why choose us conclusion
 
+IMPORTANT: Close EVERY table with </table> before starting new content.
 Use <h2>, <h3>, <p>, <table>, <ul> tags. Start directly with content, no <html> wrapper.`
     }
 }
@@ -79,7 +136,14 @@ export function createTechnicalApproachPrompt(
         : '1. IT modernization\n2. Cloud migration\n3. Security compliance'
 
     return {
-        system: `You are an expert government technical proposal writer. Generate professional HTML content.`,
+        system: `You are an expert government technical proposal writer. Generate professional HTML content.
+
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr> MUST have a closing </tr> tag
+- Every <td> and <th> MUST have closing tags
+- NEVER put section headers inside table cells
+- Complete ALL table rows before closing a table`,
         userPrompt: `Generate a TECHNICAL APPROACH section (8-10 pages) for this RFP.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum}
@@ -105,6 +169,7 @@ Generate HTML covering:
 3. Technical Summary Table
    | Requirement | Our Solution | Key Technology | Timeline |
 
+IMPORTANT: Close EVERY table with </table> before starting new content.
 Use <h2>, <h3>, <p>, <table>, <ul> tags. Start directly with content.`
     }
 }
@@ -120,7 +185,13 @@ export function createManagementApproachPrompt(
     const { personnel } = companyData
 
     return {
-        system: `You are an expert in federal program management. Generate professional HTML content.`,
+        system: `You are an expert in federal program management. Generate professional HTML content.
+
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr>, <td>, <th> MUST have closing tags
+- NEVER put section headers inside table cells
+- Complete ALL table content before starting new sections`,
         userPrompt: `Generate a MANAGEMENT APPROACH section (5-6 pages) for this RFP.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum}
@@ -152,6 +223,7 @@ Generate HTML covering:
    - QA framework
    - Quality metrics table
 
+IMPORTANT: Close EVERY table with </table> before starting new content.
 Use <h2>, <h3>, <p>, <table>, <ul> tags. Start directly with content.`
     }
 }
@@ -178,7 +250,12 @@ CONTRACT ${i+1}: ${pp.project_name}
 `).join('\n')
 
     return {
-        system: `You are an expert at writing compelling past performance narratives. Generate professional HTML.`,
+        system: `You are an expert at writing compelling past performance narratives. Generate professional HTML.
+
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr>, <td>, <th> MUST have closing tags
+- NEVER put section headers inside table cells`,
         userPrompt: `Generate a PAST PERFORMANCE section (4-5 pages) for this RFP.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum}
@@ -198,6 +275,7 @@ For EACH contract, generate:
 End with a Summary Table:
 | Project | Agency | Value | Period | Key Outcomes | Relevance |
 
+IMPORTANT: Close EVERY table with </table> before starting new content.
 Use <h2>, <h3>, <p>, <table>, <ul> tags. Start directly with content.`
     }
 }
@@ -217,7 +295,14 @@ export function createPricingPrompt(
     ).join('\n')
 
     return {
-        system: `You are an expert at federal contract pricing. Generate professional HTML with pricing tables.`,
+        system: `You are an expert at federal contract pricing. Generate professional HTML with pricing tables.
+        
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr> MUST have a closing </tr> tag
+- Every <td> and <th> MUST have closing tags
+- NEVER put section headers (h1, h2, h3) inside table cells
+- Complete ALL table content before moving to the next section`,
         userPrompt: `Generate a PRICING SUMMARY section (3-4 pages) for this RFP.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum}
@@ -249,6 +334,7 @@ Generate HTML covering:
 
 5. Cost Control & Efficiencies (1 page)
 
+IMPORTANT: Close EVERY table with </table> before starting new content.
 Use <h2>, <h3>, <p>, <table>, <ul> tags. Start directly with content.`
     }
 }
@@ -266,7 +352,13 @@ export function createComplianceMatrixPrompt(
         : 'REQ-1: Technical capability\nREQ-2: Management approach\nREQ-3: Past performance'
 
     return {
-        system: `You are an expert at creating government proposal compliance matrices. Generate professional HTML tables.`,
+        system: `You are an expert at creating government proposal compliance matrices. Generate professional HTML tables.
+
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr>, <td>, <th> MUST have closing tags
+- NEVER put section headers inside table cells
+- Complete the compliance matrix table FULLY before adding summary paragraphs`,
         userPrompt: `Generate a COMPLIANCE MATRIX (2-3 pages) for this RFP.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum}
@@ -298,6 +390,7 @@ After the main matrix, add:
 2. Any exceptions or clarifications needed
 3. Cross-reference to key differentiators
 
+IMPORTANT: Close EVERY table with </table> before starting new content.
 Use <h2>, <h3>, <p>, <table> tags. Start directly with content.`
     }
 }
@@ -324,7 +417,13 @@ PERSON ${i+1}: ${p.name}
 `).join('\n')
 
     return {
-        system: `You are an expert at writing federal proposal resumes. Generate professional HTML resumes.`,
+        system: `You are an expert at writing federal proposal resumes. Generate professional HTML resumes.
+
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr>, <td>, <th> MUST have closing tags  
+- NEVER put section headers inside table cells
+- Complete each person's qualification table before moving to next content`,
         userPrompt: `Generate KEY PERSONNEL RESUMES (1 page per person) for this RFP.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum}
@@ -355,6 +454,7 @@ For EACH person, generate a 1-page resume with:
 
 Add a page break between each resume using: <div style="page-break-after: always;"></div>
 
+IMPORTANT: Close EVERY table with </table> before starting new content.
 Use <h2>, <h3>, <p>, <table>, <ul> tags. Start directly with content.`
     }
 }
@@ -370,7 +470,13 @@ export function createAppendicesPrompt(
     const { company } = companyData
 
     return {
-        system: `You are an expert at creating government proposal appendices. Generate professional HTML content.`,
+        system: `You are an expert at creating government proposal appendices. Generate professional HTML content.
+
+CRITICAL HTML RULES:
+- Every <table> MUST have a closing </table> tag
+- Every <tr>, <td>, <th> MUST have closing tags
+- NEVER put section headers inside table cells
+- Complete each appendix table before the page break`,
         userPrompt: `Generate APPENDICES (3-4 pages) for this RFP.
 
 RFP: ${rfpAnalysis.metadata.solicitationNum}
@@ -412,6 +518,14 @@ APPENDIX E: REQUIRED REPRESENTATIONS
 - Standard FAR representations checklist
 - Small business status
 - Conflict of interest statement
+
+End the document with a brief "END OF PROPOSAL" statement.
+
+CRITICAL REQUIREMENTS:
+1. Generate ALL 5 appendices completely - do not stop early
+2. Close EVERY table with </table> before page breaks or new appendices
+3. Complete all bullet point lists - never leave empty bullets
+4. End with a clear closing statement
 
 Use <h2>, <h3>, <p>, <table>, <ul> tags. Add page breaks between appendices.`
     }

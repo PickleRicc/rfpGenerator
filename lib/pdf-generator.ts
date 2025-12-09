@@ -116,9 +116,9 @@ export async function generatePdfFromHtml(
         const pdfBuffer = await page.pdf({
             format: options.format || 'Letter',
             margin: options.margin || {
-                top: '1in',
+                top: '0.75in',
                 right: '0.75in',
-                bottom: '1in',
+                bottom: '0.75in',
                 left: '0.75in',
             },
             displayHeaderFooter: options.displayHeaderFooter ?? true,
@@ -167,9 +167,9 @@ export async function generateProposalPdf(
     return generatePdfFromHtml(html, {
         format: 'Letter',
         margin: {
-            top: '1in',
+            top: '0.75in',
             right: '0.75in',
-            bottom: '0.85in',
+            bottom: '0.75in',
             left: '0.75in',
         },
         displayHeaderFooter: true,

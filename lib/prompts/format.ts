@@ -297,6 +297,20 @@ export function assembleProposalHtml(
 <!-- Generated Proposal Content -->
 ${generatedContent}
 
+<!-- Document Footer -->
+<div style="margin-top: 60pt; padding-top: 20pt; border-top: 2px solid #2c5282; text-align: center;">
+    <p style="font-size: 10pt; color: #4a5568; margin-bottom: 8pt;">
+        <strong>END OF PROPOSAL</strong>
+    </p>
+    <p style="font-size: 9pt; color: #718096;">
+        ${company.name} | ${metadata.solicitationNum} | Submitted: ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+    </p>
+    <p style="font-size: 8pt; color: #a0aec0; margin-top: 12pt;">
+        This proposal contains proprietary and confidential information.<br>
+        Unauthorized disclosure or reproduction is prohibited.
+    </p>
+</div>
+
 </body>
 </html>`
 }

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { inngest } from '@/lib/inngest/client'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(
@@ -29,6 +30,15 @@ export async function POST(
                 { status: 400 }
             )
         }
+
+        // Send Inngest cancellation event
+        await inngest.send({
+            name: 'proposal/generate.cancelled',
+            data: {
+                jobId,
+                reason: 'Cancelled by user',
+            },
+        })
 
         // Update job status to cancelled
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

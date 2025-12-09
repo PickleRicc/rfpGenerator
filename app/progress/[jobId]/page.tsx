@@ -12,6 +12,13 @@ interface StepInfo {
     icon: string
 }
 
+interface TimeEstimate {
+    estimatedMinutes?: number
+    maxMinutes?: number
+    sizeDescription?: string
+    rfpSizeBytes?: number
+}
+
 const GENERATION_STEPS: StepInfo[] = [
     { name: 'Analyzing RFP', key: 'RFP Analysis', estimatedSeconds: 30, icon: '📄' },
     { name: 'Loading Company Data', key: 'Company Data', estimatedSeconds: 5, icon: '🏢' },
@@ -134,8 +141,26 @@ export default function ProgressPage() {
     const getTotalSteps = () => GENERATION_STEPS.length
 
     const calculateTimeRemaining = () => {
+        // Use server-provided estimates if available
+        const timeEstimate = job?.rfp_metadata as TimeEstimate | undefined
+        if (timeEstimate?.estimatedMinutes) {
+            const estimatedTotalSeconds = timeEstimate.estimatedMinutes * 60
+            const estimatedRemaining = Math.max(0, estimatedTotalSeconds - elapsedTime)
+            return estimatedRemaining
+        }
+        // Fallback to step-based calculation
         const completedCount = getCompletedCount()
         return GENERATION_STEPS.slice(completedCount).reduce((t, s) => t + s.estimatedSeconds, 0)
+    }
+
+    const getTimeEstimate = (): TimeEstimate | undefined => {
+        return job?.rfp_metadata as TimeEstimate | undefined
+    }
+
+    const isApproachingTimeout = () => {
+        const timeEstimate = getTimeEstimate()
+        const maxSeconds = (timeEstimate?.maxMinutes || 15) * 60
+        return elapsedTime > maxSeconds * 0.8 // 80% of max time
     }
 
     const isComplete = job?.status === 'completed'
@@ -239,9 +264,11 @@ export default function ProgressPage() {
                             </div>
 
                             {/* Time Stats */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginBottom: 40 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 40, marginBottom: 24 }}>
                                 <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 28, fontWeight: 600, color: '#f97316' }}>{formatTime(elapsedTime)}</div>
+                                    <div style={{ fontSize: 28, fontWeight: 600, color: isApproachingTimeout() ? '#ef4444' : '#f97316' }}>
+                                        {formatTime(elapsedTime)}
+                                    </div>
                                     <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>Elapsed</div>
                                 </div>
                                 <div style={{ textAlign: 'center' }}>
@@ -249,6 +276,64 @@ export default function ProgressPage() {
                                     <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>Remaining</div>
                                 </div>
                             </div>
+
+                            {/* Size Badge & Max Time */}
+                            {getTimeEstimate()?.sizeDescription && (
+                                <div style={{ 
+                                    display: 'flex', 
+                                    justifyContent: 'center', 
+                                    alignItems: 'center', 
+                                    gap: 12, 
+                                    marginBottom: 32,
+                                    flexWrap: 'wrap' 
+                                }}>
+                                    <span style={{
+                                        padding: '6px 12px',
+                                        backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                                        border: '1px solid rgba(249, 115, 22, 0.3)',
+                                        borderRadius: 20,
+                                        fontSize: 11,
+                                        fontWeight: 500,
+                                        color: '#f97316',
+                                    }}>
+                                        {getTimeEstimate()?.sizeDescription}
+                                    </span>
+                                    <span style={{
+                                        padding: '6px 12px',
+                                        backgroundColor: '#1a1a1a',
+                                        border: '1px solid #262626',
+                                        borderRadius: 20,
+                                        fontSize: 11,
+                                        fontWeight: 500,
+                                        color: '#9ca3af',
+                                    }}>
+                                        Max: {getTimeEstimate()?.maxMinutes || 15} min
+                                    </span>
+                                </div>
+                            )}
+
+                            {/* Timeout Warning */}
+                            {isApproachingTimeout() && (
+                                <div style={{ 
+                                    padding: '12px 16px',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                                    borderRadius: 10,
+                                    marginBottom: 24,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 10,
+                                }}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                        <line x1="12" y1="9" x2="12" y2="13"/>
+                                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                                    </svg>
+                                    <span style={{ fontSize: 12, color: '#f87171' }}>
+                                        Job taking longer than expected. May auto-cancel soon.
+                                    </span>
+                                </div>
+                            )}
 
                             {/* Current Step */}
                             <div style={{ 

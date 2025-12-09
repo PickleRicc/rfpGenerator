@@ -29,6 +29,7 @@ import {
     createComplianceMatrixPrompt,
     createKeyPersonnelResumesPrompt,
     createAppendicesPrompt,
+    sanitizeHtmlContent,
 } from './prompts/generate'
 import { assembleProposalHtml, estimatePageCount, extractContractValue } from './prompts/format'
 
@@ -157,12 +158,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Executive Summary...`)
         await updateProgress(jobId, 15, 'Generating Executive Summary...', sections)
         const execPrompt = createExecutiveSummaryPrompt(rfpAnalysis, companyData)
-        const executiveSummary = await callClaude({
+        const executiveSummaryRaw = await callClaude({
             system: execPrompt.system,
             userPrompt: execPrompt.userPrompt,
             maxTokens: 4000,
             temperature: 0.7,
         })
+        const executiveSummary = sanitizeHtmlContent(executiveSummaryRaw)
         sections.push('Executive Summary')
         console.log(`[Job ${jobId}] ✓ Executive Summary (${executiveSummary.length} chars)`)
         
@@ -172,12 +174,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Technical Approach...`)
         await updateProgress(jobId, 25, 'Generating Technical Approach...', sections)
         const techPrompt = createTechnicalApproachPrompt(rfpAnalysis, companyData)
-        const technicalApproach = await callClaude({
+        const technicalApproachRaw = await callClaude({
             system: techPrompt.system,
             userPrompt: techPrompt.userPrompt,
             maxTokens: 6000,
             temperature: 0.7,
         })
+        const technicalApproach = sanitizeHtmlContent(technicalApproachRaw)
         sections.push('Technical Approach')
         console.log(`[Job ${jobId}] ✓ Technical Approach (${technicalApproach.length} chars)`)
         
@@ -187,12 +190,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Management Approach...`)
         await updateProgress(jobId, 38, 'Generating Management Approach...', sections)
         const mgmtPrompt = createManagementApproachPrompt(rfpAnalysis, companyData)
-        const managementApproach = await callClaude({
+        const managementApproachRaw = await callClaude({
             system: mgmtPrompt.system,
             userPrompt: mgmtPrompt.userPrompt,
             maxTokens: 4000,
             temperature: 0.7,
         })
+        const managementApproach = sanitizeHtmlContent(managementApproachRaw)
         sections.push('Management Approach')
         console.log(`[Job ${jobId}] ✓ Management Approach (${managementApproach.length} chars)`)
         
@@ -202,12 +206,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Past Performance...`)
         await updateProgress(jobId, 48, 'Generating Past Performance...', sections)
         const ppPrompt = createPastPerformancePrompt(rfpAnalysis, companyData)
-        const pastPerformance = await callClaude({
+        const pastPerformanceRaw = await callClaude({
             system: ppPrompt.system,
             userPrompt: ppPrompt.userPrompt,
             maxTokens: 4000,
             temperature: 0.7,
         })
+        const pastPerformance = sanitizeHtmlContent(pastPerformanceRaw)
         sections.push('Past Performance')
         console.log(`[Job ${jobId}] ✓ Past Performance (${pastPerformance.length} chars)`)
         
@@ -217,12 +222,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Pricing...`)
         await updateProgress(jobId, 58, 'Generating Pricing...', sections)
         const pricingPrompt = createPricingPrompt(rfpAnalysis, companyData)
-        const pricing = await callClaude({
+        const pricingRaw = await callClaude({
             system: pricingPrompt.system,
             userPrompt: pricingPrompt.userPrompt,
             maxTokens: 4000,
             temperature: 0.5,
         })
+        const pricing = sanitizeHtmlContent(pricingRaw)
         sections.push('Pricing')
         console.log(`[Job ${jobId}] ✓ Pricing (${pricing.length} chars)`)
         
@@ -232,12 +238,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Compliance Matrix...`)
         await updateProgress(jobId, 68, 'Generating Compliance Matrix...', sections)
         const compliancePrompt = createComplianceMatrixPrompt(rfpAnalysis, companyData)
-        const complianceMatrix = await callClaude({
+        const complianceMatrixRaw = await callClaude({
             system: compliancePrompt.system,
             userPrompt: compliancePrompt.userPrompt,
             maxTokens: 4000,
             temperature: 0.5,
         })
+        const complianceMatrix = sanitizeHtmlContent(complianceMatrixRaw)
         sections.push('Compliance Matrix')
         console.log(`[Job ${jobId}] ✓ Compliance Matrix (${complianceMatrix.length} chars)`)
         
@@ -247,12 +254,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Key Personnel Resumes...`)
         await updateProgress(jobId, 78, 'Generating Key Personnel Resumes...', sections)
         const personnelPrompt = createKeyPersonnelResumesPrompt(rfpAnalysis, companyData)
-        const keyPersonnelResumes = await callClaude({
+        const keyPersonnelResumesRaw = await callClaude({
             system: personnelPrompt.system,
             userPrompt: personnelPrompt.userPrompt,
             maxTokens: 6000,
             temperature: 0.7,
         })
+        const keyPersonnelResumes = sanitizeHtmlContent(keyPersonnelResumesRaw)
         sections.push('Key Personnel')
         console.log(`[Job ${jobId}] ✓ Key Personnel Resumes (${keyPersonnelResumes.length} chars)`)
         
@@ -262,12 +270,13 @@ export async function generateProposal(
         console.log(`[Job ${jobId}] → Appendices...`)
         await updateProgress(jobId, 88, 'Generating Appendices...', sections)
         const appendicesPrompt = createAppendicesPrompt(rfpAnalysis, companyData)
-        const appendices = await callClaude({
+        const appendicesRaw = await callClaude({
             system: appendicesPrompt.system,
             userPrompt: appendicesPrompt.userPrompt,
-            maxTokens: 4000,
+            maxTokens: 6000,  // Increased for 5 full appendices
             temperature: 0.5,
         })
+        const appendices = sanitizeHtmlContent(appendicesRaw)
         sections.push('Appendices')
         console.log(`[Job ${jobId}] ✓ Appendices (${appendices.length} chars)`)
         

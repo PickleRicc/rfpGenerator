@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
+import { inngest, estimateGenerationTime } from '@/lib/inngest/client'
 import { NextRequest, NextResponse } from 'next/server'
-import { generateProposal } from '@/lib/proposal-service'
 
 export async function POST(request: NextRequest) {
     try {
@@ -14,10 +14,14 @@ export async function POST(request: NextRequest) {
             )
         }
 
+        // Calculate RFP size and time estimates
+        const rfpSizeBytes = new TextEncoder().encode(rfp_text).length
+        const timeEstimate = estimateGenerationTime(rfpSizeBytes)
+
         // Generate unique job ID
         const job_id = crypto.randomUUID()
 
-        // Create initial job record
+        // Create initial job record with time estimates
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: insertError } = await (supabase
             .from('proposal_jobs') as any)
@@ -26,9 +30,14 @@ export async function POST(request: NextRequest) {
                 company_id,
                 status: 'processing',
                 progress_percent: 0,
-                current_step: 'Starting...',
+                current_step: 'Queued...',
                 sections_completed: [],
-                rfp_metadata: null,
+                rfp_metadata: {
+                    rfpSizeBytes,
+                    estimatedMinutes: timeEstimate.estimatedMinutes,
+                    maxMinutes: timeEstimate.maxMinutes,
+                    sizeDescription: timeEstimate.description,
+                },
                 executive_summary: null,
                 technical_approach: null,
                 management_approach: null,
@@ -49,15 +58,28 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        // Start background processing (non-blocking)
-        // Using the NEW simplified proposal service
-        generateProposal(job_id, rfp_text, company_id, email).catch((error) => {
-            console.error('Background processing error:', error)
-            // Error is already handled inside generateProposal
+        // Trigger Inngest event (non-blocking, durable background processing)
+        await inngest.send({
+            name: 'proposal/generate.requested',
+            data: {
+                jobId: job_id,
+                rfpText: rfp_text,
+                companyId: company_id,
+                email,
+                rfpSizeBytes,
+                estimatedDurationMinutes: timeEstimate.estimatedMinutes,
+            },
         })
 
-        // Return immediately with job ID
-        return NextResponse.json({ job_id })
+        console.log(`[API] Job ${job_id} queued via Inngest (${timeEstimate.description})`)
+
+        // Return immediately with job ID and time estimates
+        return NextResponse.json({
+            job_id,
+            estimated_minutes: timeEstimate.estimatedMinutes,
+            max_minutes: timeEstimate.maxMinutes,
+            size_description: timeEstimate.description,
+        })
     } catch (error) {
         console.error('Error in create proposal endpoint:', error)
         return NextResponse.json(
