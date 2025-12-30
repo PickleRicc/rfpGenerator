@@ -149,40 +149,45 @@ export async function generatePdfFromHtml(
 
 /**
  * Generate PDF with custom header showing solicitation number
+ * 
+ * NOTE: Puppeteer header/footer templates have specific requirements:
+ * - Must include full HTML styling inline
+ * - Uses special classes: pageNumber, totalPages, title, url, date
+ * - Height is controlled by margin, not template content
  */
 export async function generateProposalPdf(
     html: string,
     solicitationNum: string,
     companyName: string
 ): Promise<Buffer> {
-    const headerFooterStyle = `
-        font-family: Arial, sans-serif;
-        font-size: 9px;
-        color: #555;
-        width: 100%;
-        padding: 0 0.75in;
-        box-sizing: border-box;
-    `
+    // Escape special characters for HTML
+    const safeSolNum = solicitationNum.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const safeCompany = companyName.replace(/</g, '&lt;').replace(/>/g, '&gt;')
     
     return generatePdfFromHtml(html, {
         format: 'Letter',
         margin: {
-            top: '0.75in',
+            top: '1in',      // Room for header
             right: '0.75in',
-            bottom: '0.75in',
+            bottom: '1in',   // Room for footer
             left: '0.75in',
         },
         displayHeaderFooter: true,
         headerTemplate: `
-            <div style="${headerFooterStyle} display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-top: 10px;">
-                <span style="font-weight: 500;">${solicitationNum}</span>
-                <span>${companyName}</span>
+            <div style="width: 100%; font-family: Arial, sans-serif; font-size: 9px; padding: 0 0.75in; margin-top: 0.35in;">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 5px; border-bottom: 1px solid #ccc;">
+                    <span style="color: #333;">Proposal</span>
+                    <span style="color: #555;">${safeSolNum} | ${safeCompany}</span>
+                </div>
             </div>
         `,
         footerTemplate: `
-            <div style="${headerFooterStyle} display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #ccc; padding-top: 8px;">
-                <span style="font-size: 8px;">CONFIDENTIAL - FOR OFFICIAL USE ONLY</span>
-                <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+            <div style="width: 100%; font-family: Arial, sans-serif; font-size: 9px; padding: 0 0.75in; margin-bottom: 0.35in;">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 5px; border-top: 1px solid #ccc;">
+                    <span style="color: #666; font-size: 8px;">CONFIDENTIAL - FOR OFFICIAL USE ONLY</span>
+                    <span style="color: #333;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+                    <span style="color: #666; font-size: 8px;">${safeCompany} PROPRIETARY</span>
+                </div>
             </div>
         `,
     })

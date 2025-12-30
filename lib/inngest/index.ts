@@ -1,5 +1,6 @@
-// Inngest exports
-export { inngest, estimateGenerationTime, MAX_JOB_DURATION_MINUTES } from './client'
-export { generateProposalFunction, monitorStalledJobs } from './functions'
-export type { ProposalGenerationEvent, ProposalCancelEvent, ProposalEvents } from './client'
-
+// Inngest Client & Functions
+export { inngest, MAX_JOB_DURATION_MINUTES } from './client'
+export { 
+    generateProposalOrchestratorFunction,
+    monitorStalledJobsFunction,
+} from './functions'

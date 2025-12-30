@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "inngest": ".\\node_modules\\inngest-cli\\bin\\inngest.exe dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
@@ -30,6 +31,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.0.6",
+    "inngest-cli": "^1.15.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -19,9 +19,16 @@ export default function HomePage() {
             try {
                 const res = await fetch('/api/companies')
                 const data = await res.json()
-                setCompanies(data)
+                // Ensure we only set an array
+                if (Array.isArray(data)) {
+                    setCompanies(data)
+                } else {
+                    console.error('Companies API did not return an array:', data)
+                    setCompanies([])
+                }
             } catch (error) {
                 console.error('Error fetching companies:', error)
+                setCompanies([])
             } finally {
                 setLoadingCompanies(false)
             }
@@ -133,7 +140,7 @@ export default function HomePage() {
                                 <select
                                     value={selectedCompanyId}
                                     onChange={(e) => setSelectedCompanyId(e.target.value)}
-                                    disabled={loadingCompanies}
+                                    disabled={loadingCompanies || companies.length === 0}
                                     style={{
                                         width: '100%',
                                         height: 56,
@@ -149,7 +156,13 @@ export default function HomePage() {
                                         cursor: 'pointer',
                                     }}
                                 >
-                                    <option value="">Select a company profile...</option>
+                                    <option value="">
+                                        {loadingCompanies 
+                                            ? 'Loading companies...' 
+                                            : companies.length === 0 
+                                                ? 'No companies found - create one first'
+                                                : 'Select a company profile...'}
+                                    </option>
                                     {companies.map((company) => (
                                         <option key={company.id} value={company.id}>
                                             {company.name}
